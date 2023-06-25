@@ -313,17 +313,49 @@ module overmind::breeder_core {
         dragon_description: String,
         dragon_uri: String
     ) acquires State {
-        // TODO: Assert that state is initialized
+        assert_state_initialized();
 
-        // TODO: Assert that collection with provided name exists
+        let state = borrow_global_mut<State>(@admin);
 
-        // TODO: Create a variable holding PDA's GUID next creation number
+        let (keys, _)= simple_map::to_vec_pair(state.breeder.collections);
 
-        // TODO: Mint a new NFT
+        assert_collection_exists(&keys, &collection_name);
+        let dragon_race = simple_map::borrow(&state.breeder.collections, &collection_name);
+        let property_keys = get_property_params_as_strings(&DRAGON_PROPERTY_KEYS);
+        let property_types = get_property_params_as_strings(&DRAGON_PROPERTY_TYPES);
 
-        // TODO: Transfer the NFT to the signer of the transaction
+        let seller_addr = account::create_resource_address(&@admin, BREEDER_SEED);
+        let admin_signer = account::create_signer_with_capability(&state.cap);
+        let creation_number = account::get_guid_next_creation_num(seller_addr);
+        
 
-        // TODO: Emit CreateMonsterEvent event
+        aptos_token::mint(
+            &admin_signer,
+            collection_name,
+            dragon_description,
+            dragon_name,
+            dragon_uri,
+            property_keys,
+            property_types,
+            dragon_race.starting_properties
+        );
+
+        let obj_addr = object::create_guid_object_address(seller_addr, creation_number);
+        let token = object::address_to_object<Token>(obj_addr);
+
+        object::transfer(&admin_signer, token, signer::address_of(account));
+
+        event::emit_event<CreateDragonEvent>(
+            &mut state.breeder.create_dragon_events,
+            breeder_events::new_create_dragon_event(
+                signer::address_of(account),
+                collection_name,
+                dragon_name,
+                dragon_description,
+                dragon_uri,
+                creation_number,
+                timestamp::now_seconds()),
+        );
     }
 
     /*
@@ -483,9 +515,9 @@ module overmind::breeder_core {
     */
     #[view]
     public fun get_equipment_starting_properties_sum(combine_amount: u64): u64 {
-        // TODO: Assert that provided combine amount is correct
+        assert_combine_amount_is_correct(combine_amount);
 
-        // TODO: Calcualte and return equipment starting properties sum
+        calculate_swords_starting_properties_sum(combine_amount)
     }
 
     /*
@@ -533,7 +565,9 @@ module overmind::breeder_core {
         @returns - string representation of properties' parameters
     */
     inline fun get_property_params_as_strings(property_params: &vector<vector<u8>>): vector<String> {
-        // TODO: Convert vector of byte representations into vector of string representations
+        vector::map_ref(property_params, |value| {
+            string::utf8(*value)
+        })
     }
 
     /*
@@ -560,17 +594,10 @@ module overmind::breeder_core {
         @returns - sum of starting properties
     */
     inline fun calculate_swords_starting_properties_sum(combine_amount: u64): u64 {
-        // TODO: Calculate sum of equipment starting properties accordingly to the formula:
-        //          (c_a - MIN_AMOUNT)^2
-        //      --------------------------- * P_Diff + P_MIN
-        //      (MAX_AMOUNT - MIN_AMOUNT)^2
-        // Where:
-        //      c_a - combine_amount
-        //      MIN_AMOUNT - MINIMAL_AMOUNT_OF_PIECES_TO_COMBINE
-        //      MAX_AMOUNT - MAXIMAL_AMOUNT_OF_PIECES_TO_COMBINE
-        //      P_Diff - Difference between EQUIPMENT_MAXIMAL_START_PROPERTY_VALUES_SUM and
-        //          EQUIPMENT_MINIMAL_START_PROPERTY_VALUES_SUM
-        //      P_MIN - EQUIPMENT_MINIMAL_START_PROPERTY_VALUES_SUM
+        let multiplier = math64::pow(combine_amount - MINIMAL_AMOUNT_TO_COMBINE, 2);
+        let divider = math64::pow(MAXIMAL_AMOUNT_TO_COMBINE - MINIMAL_AMOUNT_TO_COMBINE, 2);
+        let result = math64::mul_div(multiplier, SWORD_MAXIMAL_START_PROPERTY_VALUES_SUM-SWORD_MINIMAL_START_PROPERTY_VALUES_SUM, divider)+SWORD_MINIMAL_START_PROPERTY_VALUES_SUM;
+        result
     }
 
     /*
@@ -626,7 +653,7 @@ module overmind::breeder_core {
     }
 
     inline fun assert_collection_exists(collections: &vector<String>, collection_name: &String) {
-        // TODO: Assert that the vector contains the collection's name
+        assert!(vector::contains(collections, collection_name), ERROR_COLLECTION_DOES_NOT_EXIST);
     }
 
     inline fun assert_signer_owns_token(owner: &signer, token: Object<Token>) {
