@@ -18,6 +18,7 @@ module overmind::breeder_core {
     use aptos_std::aptos_hash;
     use aptos_std::from_bcs;
     use aptos_std::math64;
+    use aptos_std::type_info;
     use aptos_std::simple_map::{Self, SimpleMap};
     use aptos_framework::account::{Self, SignerCapability};
     use aptos_framework::event::{Self, EventHandle};
@@ -510,29 +511,78 @@ module overmind::breeder_core {
         new_dragon_description: String,
         new_dragon_uri: String
     ) acquires State {
-        // TODO: Assert that state is initialized
+        assert_state_initialized();
 
-        // TODO: Assert that the signer owns the first monster token
+        let resource_account_address = account::create_resource_address(&@admin, BREEDER_SEED);
 
-        // TODO: Assert that the signer owns the second monster token
+        let token_first_dragon_address = object::create_guid_object_address(resource_account_address, first_dragon_creation_number);
+        let token_first_dragon_object = object::address_to_object<Token>(token_first_dragon_address);
 
-        // TODO: Assert that the monsters are breeding
+        assert_signer_owns_token(owner,token_first_dragon_object);
 
-        // TODO: Assert that the breeding has finished
+        let token_second_dragon_address = object::create_guid_object_address(resource_account_address, second_dragon_creation_number);
+        let token_second_dragon_object = object::address_to_object<Token>(token_second_dragon_address);
+        assert_signer_owns_token(owner,token_second_dragon_object);
 
-        // TODO: Remove breeding record from Breeder's ongoing_breedings
 
-        // TODO: Unfreeze transfer of both monster tokens
+        let breeding_key_bytes = bcs::to_bytes(&token_first_dragon_address);
+        vector::append(&mut breeding_key_bytes, bcs::to_bytes(&token_second_dragon_address));
+        let breeding_key = aptos_hash::sha3_512(breeding_key_bytes);
+        
+        let state = borrow_global_mut<State>(@admin);
+        
+        assert_dragons_are_breeding(&state.breeder.ongoing_breedings, &breeding_key);
 
-        // TODO: Create a variable and save PDA's GUID next creation number
+        assert_breeding_finished(&state.breeder.ongoing_breedings, &breeding_key);
 
-        // TODO: Combine properties of the monster tokens
+        simple_map::remove(&mut state.breeder.ongoing_breedings, &breeding_key);
 
-        // TODO: Mint a new monster token
+        let admin_signer = account::create_signer_with_capability(&state.cap);
+        aptos_token::unfreeze_transfer(&admin_signer, token_first_dragon_object);
+        aptos_token::unfreeze_transfer(&admin_signer, token_second_dragon_object);
 
-        // TODO: Transfer the new monster token to the owner
+        let new_dragon_creation_number = account::get_guid_next_creation_num(resource_account_address);
 
-        // TODO: Emit HatchMonsterEvent event
+        let property_map_first = object::address_to_object<PropertyMap>(token_first_dragon_address);        
+        let property_map_second = object::address_to_object<PropertyMap>(token_second_dragon_address);
+        let property_map_objects = vector[
+            property_map_first,
+            property_map_second
+        ];
+        let property_keys = get_property_params_as_strings(&DRAGON_PROPERTY_KEYS);
+        let property_types = get_property_params_as_strings(&DRAGON_PROPERTY_TYPES);
+        let combined_properties = combine_properties(property_keys, property_map_objects);
+
+        aptos_token::mint(
+            &admin_signer,
+            token::collection_name(token_first_dragon_object),
+            new_dragon_description,
+            new_dragon_name,
+            new_dragon_uri,
+            property_keys,
+            property_types,
+            combined_properties
+        );
+
+        let obj_addr = object::create_guid_object_address(resource_account_address, new_dragon_creation_number);
+        let token = object::address_to_object<Token>(obj_addr);
+
+        object::transfer(&admin_signer, token, signer::address_of(owner));
+
+        event::emit_event<HatchDragonEvent>(
+            &mut state.breeder.hatch_dragon_events,
+            breeder_events::new_hatch_dragon_event(
+                signer::address_of(owner),
+                first_dragon_creation_number,
+                second_dragon_creation_number,
+                new_dragon_creation_number,
+                new_dragon_name,
+                new_dragon_description,
+                new_dragon_uri,
+                combined_properties,
+                timestamp::now_seconds()
+            ),
+        );
     }
 
     /*
@@ -552,28 +602,62 @@ module overmind::breeder_core {
         new_sword_description: String,
         new_sword_uri: String
     ) acquires State {
-        // TODO: Assert that state is initialized
+        assert_state_initialized();
 
-        // TODO: Assert that amount of equipment to burn is correct
+        let state = borrow_global_mut<State>(@admin);
+        let sword = simple_map::borrow(&state.combiner.collections, &collection_name);
+        assert_amount_of_swords_is_correct(&swords_creation_numbers, sword.combine_amount);
 
-        // TODO: Create a vector and for each of equipment's creation numbers:
-        //      1. Create Object<PropertyMap>
-        //      2. Push it to the vector
+        let resource_account_address = account::create_resource_address(&@admin, BREEDER_SEED);
+        let property_map_objects = vector::map(swords_creation_numbers, |swords_creation_number| {
+            let property_map_address = object::create_guid_object_address(resource_account_address, swords_creation_number);
+            object::address_to_object<PropertyMap>(property_map_address)
+        });
 
-        // TODO: Combine properties of the equipment
+        let property_keys = get_property_params_as_strings(&SWORD_PROPERTY_KEYS);
+        let property_types = get_property_params_as_strings(&SWORD_PROPERTY_TYPES);
+        let new_sword_property_values = combine_properties(property_keys, property_map_objects);
 
-        // TODO: For each of equipement's creation numbers
-        //      1. Assert that the signer owns the token
-        //      2. Assert that the token is from the provided collection
-        //      3. Burn the token
+        let admin_signer = account::create_signer_with_capability(&state.cap);
+        vector::for_each(swords_creation_numbers, |swords_creation_number| {
+            let token_address = object::create_guid_object_address(resource_account_address, swords_creation_number);
+            let token_object = object::address_to_object<Token>(token_address);
+            assert_signer_owns_token(owner,token_object);
+            assert_token_is_from_correct_collection(collection_name, token_object);
+            aptos_token::burn(&admin_signer, token_object);
+        });
 
-        // TODO: Save PDA's GUID next creation number
+        let new_sword_creation_number = account::get_guid_next_creation_num(resource_account_address);
 
-        // TODO: Mint a new equipment NFT with combined properties
+        aptos_token::mint(
+            &admin_signer,
+            collection_name,
+            new_sword_description,
+            new_sword_name,
+            new_sword_uri,
+            property_keys,
+            property_types,
+            new_sword_property_values
+        );
+        let obj_addr = object::create_guid_object_address(resource_account_address, new_sword_creation_number);
+        let token = object::address_to_object<Token>(obj_addr);
 
-        // TODO: Transfer the new equipment NFT to the owner
+        object::transfer(&admin_signer, token, signer::address_of(owner));
 
-        // TODO: Emit CombineEquipmentEvent event
+        event::emit_event<CombineSwordsEvent>(
+            &mut state.combiner.combine_swords_events,
+            breeder_events::new_combine_swords_event(
+                signer::address_of(owner),
+                collection_name,
+                swords_creation_numbers,
+                new_sword_creation_number,
+                new_sword_name,
+                new_sword_description,
+                new_sword_uri,
+                new_sword_property_values,
+                timestamp::now_seconds()
+            ),
+        );
     }
 
     /*
@@ -644,16 +728,19 @@ module overmind::breeder_core {
         @returns - list of starting properties
     */
     inline fun calculate_dragons_starting_properties(breeding_time: u64): vector<u64> {
-        // TODO: Calculate monster starting properties accordingly to the formula:
-        //        (b_t - MIN_B_T)^3
-        //      --------------------- * P_Diff + P_Min
-        //      (MAX_B_T - MIN_B_T)^3
-        // Where:
-        //      b_t - breeding_time
-        //      MIN_B_T - MINIMAL_BREEDING_TIME
-        //      MAX_B_T - MAXIMAL_BREEDING_TIME
-        //      P_Diff - Difference between minimal and maximal of one of monster start property values
-        //      P_Min - Minimal value of one of monster start property values
+        let i = 0;
+        let multiplier = math64::pow(breeding_time - MINIMAL_BREEDING_TIME, 3);
+        let divider = math64::pow(MAXIMAL_BREEDING_TIME - MINIMAL_BREEDING_TIME, 3);
+        let vectorResult = vector::empty<u64>();
+
+        while (i < vector::length(&DRAGON_MINIMAL_START_PROPERTY_VALUES)) {
+            let min = vector::borrow(&DRAGON_MINIMAL_START_PROPERTY_VALUES, i);
+            let max = vector::borrow(&DRAGON_MAXIMAL_START_PROPERTY_VALUES, i);
+            let final = math64::mul_div(multiplier, *max - *min, divider) + *min;
+            vector::push_back(&mut vectorResult, final);
+            i = i + 1;
+        };
+        vectorResult
     }
 
     /*
@@ -678,16 +765,31 @@ module overmind::breeder_core {
         property_keys: vector<String>,
         property_maps: vector<Object<PropertyMap>>
     ): vector<vector<u8>> {
-        // TODO: Assert that both vectors have the same length
+        assert_property_vectors_lengths(&property_keys, &property_maps);
 
-        // TODO: Create a vector for combined properties
+        let leng = vector::length(&property_keys);
+        let returnVector = vector::empty<vector<u8>>();
+        let i = 0;
 
-        // TODO: For each of property keys:
-        //      1. Read property's type and value from each of property maps
-        //          a. If the type is u64, then add it to an accumulator
-        //          b. If the type is not u64, then push it to the vector and break looping through property maps
-        //      2. If the accumulator does not have any value, then continue to the next iteration
-        //      3. Otherwise, push the accumulator's value to the vector
+        // This code can be improved
+        while (i < leng) {
+            let acummulator = 0;
+            let key = vector::borrow(&property_keys, i);
+            vector::for_each_ref(&property_maps, |object| {
+                let (type, value) = property_map::read(object, key);
+                if (type != type_info::type_name<u64>()) {
+                    vector::push_back(&mut returnVector, value);
+                    break
+                } else {
+                    acummulator = from_bcs::to_u64(value) + acummulator;
+                };
+            });
+            i = i + 1;
+            if (acummulator>0 ){
+                vector::push_back(&mut returnVector, bcs::to_bytes(&acummulator));
+            };
+        };
+        returnVector
     }
 
     /////////////
@@ -707,13 +809,16 @@ module overmind::breeder_core {
     }
 
     inline fun assert_combine_amount_is_correct(combine_amount: u64) {
-        // TODO: Assert that combine_amount is greater or equals to MINIMAL_TO_COMBINE and is smaller
-        //      or equals to MAXIMAL_AMOUNT_TO_COMBINE
+        assert!(combine_amount >= MINIMAL_AMOUNT_TO_COMBINE && combine_amount <= MAXIMAL_AMOUNT_TO_COMBINE, ERROR_INVALID_COMBINE_AMOUNT);
 
     }
 
     inline fun assert_sword_property_values_sum_is_correct(property_values: &vector<u64>, expected_sum: u64) {
-        // TODO: Assert that sum of property_values' values is smaller or equals expected_sum
+        let sum = 0;
+        vector::for_each_ref(property_values, |value| {
+           sum = sum + *value;
+        });
+        assert!(sum <= expected_sum, ERROR_INVALID_SWORDS_PROPERTY_VALUES_SUM);
     }
 
     inline fun assert_collection_does_not_exist(collections: &vector<String>, collection_name: &String) {
@@ -736,25 +841,29 @@ module overmind::breeder_core {
         ongoing_breedings: &SimpleMap<vector<u8>, u64>,
         dragons_pair_hash: &vector<u8>
     ) {
-        // TODO: Assert that the map contains the provided key
+        assert!(simple_map::contains_key(ongoing_breedings, dragons_pair_hash), ERROR_DRAGONS_NOT_BREEDING);
     }
 
     inline fun assert_breeding_finished(
         ongoing_breedings: &SimpleMap<vector<u8>, u64>,
         dragons_pair_hash: &vector<u8>
     ) {
-        // TODO: Assert that timestamp related to the provided monster_pair_hash is smaller or equals current timestamp
+        let timestamp = simple_map::borrow(ongoing_breedings, dragons_pair_hash);
+        let current_timestamp = timestamp::now_seconds();
+        assert!(*timestamp <= current_timestamp, ERROR_BREEDING_HAS_NOT_ENDED);
     }
 
     inline fun assert_amount_of_swords_is_correct(swords: &vector<u64>, combine_amount: u64) {
-        // TODO: Assert that the vector's length equals to combine_amount
+        assert!(vector::length(swords) == combine_amount, ERROR_INCORRECT_AMOUNT_OF_SWORDS);
     }
 
     inline fun assert_property_vectors_lengths(
         property_keys: &vector<String>,
         properties: &vector<Object<PropertyMap>>
     ) {
-        // TODO: Assert that each of the property maps length equals to number of keys in property_keys
+        vector::for_each_ref(properties, |value| {
+            assert!(vector::length(property_keys) == property_map::length(value), ERROR_PROPERTY_LENGTH_MISMATCH);
+        });
     }
 
     inline fun assert_token_is_from_correct_collection(collection_name: String, token: Object<Token>) {
