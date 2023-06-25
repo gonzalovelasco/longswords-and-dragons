@@ -438,29 +438,59 @@ module overmind::breeder_core {
         first_dragon_creation_number: u64,
         second_dragon_creation_number: u64
     ) acquires State {
-        // TODO: Assert that state is initialized
+        assert_state_initialized();
 
-        // TODO: Assert that collection with provided name exists
+        let state = borrow_global_mut<State>(@admin);
 
-        // TODO: Assert that the signer owns the first monster token
+        let (keys, _)= simple_map::to_vec_pair(state.breeder.collections);
 
-        // TODO: Assert that the first monster token is from the provided collection
+        assert_collection_exists(&keys, &collection_name);
+        let resource_account_address = account::create_resource_address(&@admin, BREEDER_SEED);
 
-        // TODO: Assert that the first monster is not breeding
+        let token_first_dragon_address = object::create_guid_object_address(resource_account_address, first_dragon_creation_number);
+        let token_first_dragon_object = object::address_to_object<Token>(token_first_dragon_address);
 
-        // TODO: Assert that the signer owns the second monster token
+        assert_signer_owns_token(owner,token_first_dragon_object);
 
-        // TODO: Assert that the second monster token is from the provided collection
+        assert_token_is_from_correct_collection(collection_name, token_first_dragon_object);
 
-        // TODO: Assert that the second monster is not breeding
+        assert_dragon_not_breeding(token_first_dragon_object);
 
-        // TODO: Create a hash from both of monster addresses
+        let token_second_dragon_address = object::create_guid_object_address(resource_account_address, second_dragon_creation_number);
+        let token_second_dragon_object = object::address_to_object<Token>(token_second_dragon_address);
 
-        // TODO: Add new record to Breeder's ongoing_breedings
+        assert_signer_owns_token(owner,token_second_dragon_object);
 
-        // TODO: Freeze transfer of both tokens
+        assert_token_is_from_correct_collection(collection_name, token_second_dragon_object);
 
-        // TODO: Emit BreedMonsterEvent event
+        assert_dragon_not_breeding(token_second_dragon_object);
+
+        let breeding_key_bytes = bcs::to_bytes(&token_first_dragon_address);
+        vector::append(&mut breeding_key_bytes, bcs::to_bytes(&token_second_dragon_address));
+        let breeding_key = aptos_hash::sha3_512(breeding_key_bytes);
+
+        let state = borrow_global_mut<State>(@admin);
+        let dragon_race = simple_map::borrow(&state.breeder.collections, &collection_name);
+        simple_map::add(&mut state.breeder.ongoing_breedings, breeding_key, dragon_race.breeding_time);
+
+        let admin_signer = account::create_signer_with_capability(&state.cap);
+
+        aptos_token::freeze_transfer(&admin_signer, token_first_dragon_object);
+        aptos_token::freeze_transfer(&admin_signer, token_second_dragon_object);
+
+        let current_timestamp = timestamp::now_seconds();
+        let  finish_timestamp = current_timestamp + dragon_race.breeding_time;
+        event::emit_event<BreedDragonsEvent>(
+            &mut state.breeder.breed_dragons_events,
+            breeder_events::new_breed_dragons_event(
+                signer::address_of(owner),
+                collection_name,
+                first_dragon_creation_number,
+                second_dragon_creation_number,
+                finish_timestamp,
+                current_timestamp
+            ),
+        );
     }
 
     /*
@@ -695,11 +725,11 @@ module overmind::breeder_core {
     }
 
     inline fun assert_signer_owns_token(owner: &signer, token: Object<Token>) {
-        // TODO: Assert that address of the owner is the same as the owner of the object
+        assert!(object::owner(token) == signer::address_of(owner), ERROR_SIGNER_IS_NOT_THE_OWNER);
     }
 
     inline fun assert_dragon_not_breeding(monster: Object<Token>) {
-        // TODO: Assert that transfer of the object is allowed
+        assert!(object::ungated_transfer_allowed(monster), ERROR_DRAGON_DURING_BREEDING);
     }
 
     inline fun assert_dragons_are_breeding(
@@ -728,7 +758,7 @@ module overmind::breeder_core {
     }
 
     inline fun assert_token_is_from_correct_collection(collection_name: String, token: Object<Token>) {
-        // TODO: Assert that collection of the token is the same as collection_name
+        assert!(token::collection_name(token) == collection_name, ERROR_TOKEN_FROM_WRONG_COLLECTION);
     }
 
     ///////////
