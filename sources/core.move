@@ -216,21 +216,36 @@ module overmind::breeder_core {
         breeding_time: u64,
         ability_property: String
     ) acquires State {
-        // TODO: Assert that the state is initialized
+        assert_state_initialized();
 
-        // TODO: Assert that breeding time is correct
+        assert_breeding_time_is_correct(breeding_time);
 
-        // TODO: Assert that a collection with provided name does not exist
+        let state = borrow_global_mut<State>(@admin);
 
-        // TODO: Create a collection
+        let (keys, _)= simple_map::to_vec_pair(state.breeder.collections);
 
-        // TODO: Calculate monster starting properties
+        assert_collection_does_not_exist(&keys, &name);
+        
 
-        // TODO: Push ability property to the starting properties
+        let starting_properties = calculate_dragons_starting_properties(breeding_time);
+        let starting_properties_map = vector::map(starting_properties, |starting_property| {
+             bcs::to_bytes(&starting_property)
+        });
+        vector::push_back(&mut starting_properties_map, bcs::to_bytes(&ability_property));
 
-        // TODO: Add a new MonsterRace to Breeder's collections
+        let dragon = DragonRace {
+            breeding_time,
+            starting_properties: starting_properties_map
+        };
+        simple_map::add(&mut state.breeder.collections, name, dragon);
+        let admin_signer = account::create_signer_with_capability(&state.cap);
 
-        // TODO: Emit CreateMonsterCollectionEvent event
+        create_collection_internal(&admin_signer, name, description, uri, 50, false, true);
+
+        event::emit_event<CreateDragonCollectionEvent>(
+            &mut state.breeder.create_dragon_collection_events,
+            breeder_events::new_create_dragon_collection_event(name, description, uri, breeding_time, starting_properties_map, timestamp::now_seconds()),
+        );
     }
 
     /*
@@ -557,12 +572,11 @@ module overmind::breeder_core {
     }
 
     inline fun assert_state_initialized() {
-        // TODO: Assert that State resource exists at the admin address
+        assert!(exists<State>(@admin), ERROR_STATE_NOT_INITIALIZED);
     }
 
     inline fun assert_breeding_time_is_correct(breeding_time: u64) {
-        // TODO: Assert that breeding_time is greater or equals to MINIMAL_BREEDING_TIME and is smaller or equals to
-        //      MAXIMAL_BREEDING_TIME
+        assert!(breeding_time >= MINIMAL_BREEDING_TIME && breeding_time <= MAXIMAL_BREEDING_TIME, ERROR_INVALID_BREEDING_TIME);
     }
 
     inline fun assert_combine_amount_is_correct(combine_amount: u64) {
@@ -576,7 +590,7 @@ module overmind::breeder_core {
     }
 
     inline fun assert_collection_does_not_exist(collections: &vector<String>, collection_name: &String) {
-        // TODO: Assert that the vector does not contain the collection's name
+        assert!(!vector::contains(collections, collection_name), ERROR_COLLECTION_ALREADY_EXISTS);
     }
 
     inline fun assert_collection_exists(collections: &vector<String>, collection_name: &String) {
