@@ -375,16 +375,54 @@ module overmind::breeder_core {
         sword_uri: String,
         amount: u64
     ) acquires State {
-        // TODO: Assert that state is initialized
+        assert_state_initialized();
 
-        // TODO: Assert that collection with provided name exists
+        let state = borrow_global_mut<State>(@admin);
 
-        // TODO: For every token to be created:
-        //      1. Create a variable holding PDA's GUID next creation number
-        //      2. Mint a new NFT
-        //      3. Transfer the NFT to the signer of the transaction
+        let (keys, _)= simple_map::to_vec_pair(state.combiner.collections);
 
-        // TODO: Emit CreateEquipmentEvent event
+        assert_collection_exists(&keys, &collection_name);
+        let sword = simple_map::borrow(&state.combiner.collections, &collection_name);
+        let property_keys = get_property_params_as_strings(&SWORD_PROPERTY_KEYS);
+        let property_types = get_property_params_as_strings(&SWORD_PROPERTY_TYPES);
+
+        let seller_addr = account::create_resource_address(&@admin, BREEDER_SEED);
+        let admin_signer = account::create_signer_with_capability(&state.cap);
+
+        let i = 0;
+        let creation_numbers = vector::empty<u64>();
+        while (i < amount) {
+            let creation_number = account::get_guid_next_creation_num(seller_addr);
+            aptos_token::mint(
+                &admin_signer,
+                collection_name,
+                sword_description,
+                sword_name,
+                sword_uri,
+                property_keys,
+                property_types,
+                sword.starting_properties
+            );
+
+            let obj_addr = object::create_guid_object_address(seller_addr, creation_number);
+            let token = object::address_to_object<Token>(obj_addr);
+            object::transfer(&admin_signer, token, signer::address_of(account));
+            vector::push_back(&mut creation_numbers, creation_number);
+            i = i + 1;
+        };
+
+         event::emit_event<CreateSwordEvent>(
+            &mut state.combiner.create_sword_events,
+            breeder_events::new_create_sword_event(
+                signer::address_of(account),
+                collection_name,
+                sword_name,
+                sword_description,
+                sword_uri,
+                amount,
+                creation_numbers,
+                timestamp::now_seconds()),
+        );
     }
 
     /*
