@@ -175,11 +175,28 @@ module overmind::breeder_core {
         @param admin - signer of the admin account
     */
     public entry fun init(admin: &signer) {
-        // TODO: Assert the signer is the admin
+        assert_signer_is_admin(admin);
 
-        // TODO: Create resource account
-
-        // TODO: Create State instance and move it to the admin
+        // Create resource account
+        let (_, res_cap)  = account::create_resource_account(admin, BREEDER_SEED);
+        let state = State {
+            breeder: Breeder {
+                collections: simple_map::create(),
+                ongoing_breedings: simple_map::create(),
+                create_dragon_collection_events: account::new_event_handle<CreateDragonCollectionEvent>(admin),
+                create_dragon_events: account::new_event_handle<CreateDragonEvent>(admin),
+                breed_dragons_events: account::new_event_handle<BreedDragonsEvent>(admin),
+                hatch_dragon_events:  account::new_event_handle<HatchDragonEvent>(admin),
+            },
+            combiner: Combiner {
+                collections: simple_map::create(),
+                create_sword_collection_events: account::new_event_handle<CreateSwordCollectionEvent>(admin),
+                create_sword_events: account::new_event_handle<CreateSwordEvent>(admin),
+                combine_swords_events: account::new_event_handle<CombineSwordsEvent>(admin),
+            },
+            cap: res_cap,
+        };
+        move_to(admin, state)
     }
 
     /*
@@ -536,7 +553,7 @@ module overmind::breeder_core {
     /////////////
 
     inline fun assert_signer_is_admin(admin: &signer) {
-        // TODO: Assert that address of the parameter is the same as admin in Move.toml
+        assert!(signer::address_of(admin) == @admin, ERROR_SIGNER_NOT_ADMIN);
     }
 
     inline fun assert_state_initialized() {
