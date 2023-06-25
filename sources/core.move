@@ -177,7 +177,6 @@ module overmind::breeder_core {
     public entry fun init(admin: &signer) {
         assert_signer_is_admin(admin);
 
-        // Create resource account
         let (_, res_cap)  = account::create_resource_account(admin, BREEDER_SEED);
         let state = State {
             breeder: Breeder {
@@ -240,7 +239,7 @@ module overmind::breeder_core {
         simple_map::add(&mut state.breeder.collections, name, dragon);
         let admin_signer = account::create_signer_with_capability(&state.cap);
 
-        create_collection_internal(&admin_signer, name, description, uri, 50, false, true);
+        create_collection_internal(&admin_signer, name, description, uri, DRAGON_COLLECTION_MAX_SUPPLY, false, true);
 
         event::emit_event<CreateDragonCollectionEvent>(
             &mut state.breeder.create_dragon_collection_events,
@@ -266,21 +265,37 @@ module overmind::breeder_core {
         property_values: vector<u64>,
         ability_property: String
     ) acquires State {
-        // TODO: Assert that combine amount is correct
 
-        // TODO: Calculate equipment starting properties sum
+        let starting_properties_sum = get_equipment_starting_properties_sum(combine_amount);
 
-        // TODO: Assert that sum of provided property_values is correct
+        assert_sword_property_values_sum_is_correct(&property_values, starting_properties_sum);
 
-        // TODO: Assert that state is initialized
+        assert_state_initialized();
 
-        // TODO: Assert that collection with provided name does not exist
+        let state = borrow_global_mut<State>(@admin);
+        let (keys, _)= simple_map::to_vec_pair(state.combiner.collections);
+        assert_collection_does_not_exist(&keys, &name);
 
-        // TODO: Create a collection
+        let starting_properties = vector::map_ref(&property_values, |startingProperty| {
+             bcs::to_bytes(startingProperty)
+        });
 
-        // TODO: Create a new Equipment and add it to Combiner's collections
+        vector::push_back(&mut starting_properties, bcs::to_bytes(&ability_property));
 
-        // TODO: Emit CreateEquipmentCollectionEvent event
+       let sword = SwordType {
+            combine_amount,
+            starting_properties
+        };
+        simple_map::add(&mut state.combiner.collections, name, sword);
+
+        let admin_signer = account::create_signer_with_capability(&state.cap);
+
+        create_collection_internal(&admin_signer, name, description, uri, SWORD_COLLECTION_MAX_SUPPLY, true, false);
+
+        event::emit_event<CreateSwordCollectionEvent>(
+            &mut state.combiner.create_sword_collection_events,
+            breeder_events::new_create_sword_collection_event(name, description, uri, combine_amount, starting_properties, timestamp::now_seconds()),
+        );
     }
 
     /*
@@ -492,7 +507,24 @@ module overmind::breeder_core {
         burnable: bool,
         freezable: bool
     ) {
-        // TODO: Call aptos_token::creation_collection function with appropriate parameters
+        aptos_token::create_collection(
+            creator,
+            description,
+            supply,
+            name,
+            uri,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            burnable,
+            freezable,
+            ROYALTY_NUMERATOR,
+            ROYALTY_DENOMINATOR
+        );
     }
 
     /*
